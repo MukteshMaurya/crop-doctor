@@ -17,48 +17,29 @@ MODEL_PATH = os.path.join(BASE_DIR, "model.onnx")
 CSV_PATH = os.path.join(BASE_DIR, "prescriptions.csv")
 
 session = None
-PRESCRIPTIONS_DB = {}
-CLASS_NAMES = []
-
-import torch
+PRESCRIPTIONS_LIST = []  # Ordered list for index-based lookup
 
 def load_prescriptions_csv():
-    global PRESCRIPTIONS_DB, CLASS_NAMES
-    if PRESCRIPTIONS_DB or not os.path.exists(CSV_PATH):
+    global PRESCRIPTIONS_LIST
+    if PRESCRIPTIONS_LIST or not os.path.exists(CSV_PATH):
         return
     try:
-        # 1. First attempt to pull true class names directly from PyTorch checkpoint if present
-        PTH_PATH = os.path.join(BASE_DIR, "unified_plant_resnet50.pth")
-        if os.path.exists(PTH_PATH):
-            try:
-                checkpoint = torch.load(PTH_PATH, map_location="cpu")
-                if isinstance(checkpoint, dict) and 'class_names' in checkpoint:
-                    CLASS_NAMES = checkpoint['class_names']
-            except Exception as e:
-                print(f"Could not load class_names from pth: {e}")
-
-        # 2. Load CSV prescription mappings
         with open(CSV_PATH, mode='r', encoding='utf-8') as csv_file:
             csv_reader = csv.DictReader(csv_file)
-            csv_classes = []
             for row in csv_reader:
                 raw_class = row["raw_class"].strip()
-                csv_classes.append(raw_class)
-                PRESCRIPTIONS_DB[raw_class] = {
+                PRESCRIPTIONS_LIST.append({
+                    "raw_class": raw_class,
                     "status": row.get("status", "Unknown"),
                     "disease_name": row.get("disease_name", raw_class),
                     "description": row.get("description", "N/A"),
                     "organic_remedy": row.get("organic_remedy", "N/A"),
                     "chemical_treatment": row.get("chemical_treatment", "N/A"),
                     "prevention": row.get("prevention", "N/A")
-                }
-        
-        # Fallback to CSV class order if class_names wasn't stored in checkpoint
-        if not CLASS_NAMES:
-            CLASS_NAMES = csv_classes
-
+                })
+        print(f"Loaded {len(PRESCRIPTIONS_LIST)} classes from CSV.")
     except Exception as e:
-        print(f"Error reading CSV/PTH: {e}")
+        print(f"Error reading CSV: {e}")
 
 def get_onnx_session():
     global session
@@ -71,14 +52,13 @@ def preprocess_image(image_bytes):
     img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
     img = img.resize((224, 224))
     
-    # Convert image to float array and normalize (ImageNet stats)
     arr = np.array(img, dtype=np.float32) / 255.0
     mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
     std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
     
     arr = (arr - mean) / std
     arr = arr.transpose(2, 0, 1)  # HWC to CHW
-    arr = np.expand_dims(arr, axis=0)  # Add batch dim
+    arr = np.expand_dims(arr, axis=0)  # Batch dim
     return arr
 
 def softmax(x):
@@ -112,16 +92,20 @@ def predict():
         predicted_idx = int(np.argmax(probs))
         confidence_pct = round(float(probs[predicted_idx]) * 100, 2)
 
-        raw_class_name = CLASS_NAMES[predicted_idx] if predicted_idx < len(CLASS_NAMES) else f"Class_{predicted_idx}"
-        
-        prescription_data = PRESCRIPTIONS_DB.get(raw_class_name, {
-            "status": "Unknown",
-            "disease_name": raw_class_name,
-            "description": "Details not found in CSV database.",
-            "organic_remedy": "Consult a local agricultural expert.",
-            "chemical_treatment": "N/A",
-            "prevention": "N/A"
-        })
+        # Match prediction directly by index from CSV list
+        if predicted_idx < len(PRESCRIPTIONS_LIST):
+            prescription_data = PRESCRIPTIONS_LIST[predicted_idx]
+            raw_class_name = prescription_data["raw_class"]
+        else:
+            raw_class_name = f"Unknown Class {predicted_idx}"
+            prescription_data = {
+                "status": "Unknown",
+                "disease_name": raw_class_name,
+                "description": "Details not found in CSV database.",
+                "organic_remedy": "Consult a local agricultural expert.",
+                "chemical_treatment": "N/A",
+                "prevention": "N/A"
+            }
 
         return jsonify({
             "success": True,
