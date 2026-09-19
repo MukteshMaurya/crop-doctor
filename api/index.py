@@ -8,21 +8,17 @@ from torchvision import models, transforms
 from PIL import Image
 from flask import Flask, request, jsonify, render_template
 
-app = Flask(__name__, template_folder='../templates')
+# Resolve root directory relative to this api/ script
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+TEMPLATE_DIR = os.path.join(BASE_DIR, "templates")
+
+app = Flask(__name__, template_folder=TEMPLATE_DIR)
 
 DEVICE = torch.device("cpu")
 
-# Determine model path dynamically (use /tmp on Vercel to bypass bundle limits)
-if os.getenv("VERCEL"):
-    MODEL_PATH = "/tmp/unified_plant_resnet50.pth"
-else:
-    MODEL_PATH = "unified_plant_resnet50.pth"
-
+MODEL_PATH = os.path.join(BASE_DIR, "unified_plant_resnet50.pth")
+CSV_PATH = os.path.join(BASE_DIR, "prescriptions.csv")
 MODEL_URL = "https://media.githubusercontent.com/media/MukteshMaurya/crop-doctor/main/unified_plant_resnet50.pth"
-
-# Resolve CSV path relative to project root
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) if os.getenv("VERCEL") else "."
-CSV_PATH = os.path.join(BASE_DIR, "prescriptions.csv") if os.getenv("VERCEL") else "prescriptions.csv"
 
 model = None
 CLASS_NAMES = []
@@ -72,13 +68,9 @@ def load_model():
     if model is not None:
         return
 
-    # 1. Load CSV database
     load_prescriptions_csv()
-
-    # 2. Download model to /tmp on Vercel cold-start if missing
     download_model_if_needed()
 
-    # 3. Load weights
     checkpoint = torch.load(MODEL_PATH, map_location=DEVICE)
     
     if isinstance(checkpoint, dict) and 'class_names' in checkpoint:
@@ -113,10 +105,11 @@ transform = transforms.Compose([
 def home():
     try:
         return render_template('index.html')
-    except Exception:
+    except Exception as e:
         return jsonify({
             "status": "ready",
-            "message": "Crop Doctor API operational. Send POST requests to /predict."
+            "message": "Crop Doctor API operational. Send POST requests to /predict.",
+            "template_error": str(e)
         }), 200
 
 @app.route('/health', methods=['GET'])
@@ -152,7 +145,6 @@ def predict():
         raw_class_name = CLASS_NAMES[class_index]
         confidence_pct = round(confidence.item() * 100, 2)
 
-        # Match prediction directly against CSV dictionary lookup
         prescription_data = PRESCRIPTIONS_DB.get(raw_class_name, {
             "status": "Unknown",
             "disease_name": raw_class_name,
