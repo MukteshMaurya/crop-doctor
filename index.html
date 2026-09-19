@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crop Doctor - Plant Disease Identifier</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 600px; margin: 20px auto; padding: 20px; text-align: center; }
+        .btn-container { display: flex; gap: 10px; justify-content: center; margin: 20px 0; }
+        .btn { padding: 12px 20px; font-size: 16px; border: none; border-radius: 6px; cursor: pointer; color: white; }
+        .btn-camera { background-color: #2e7d32; }
+        .btn-gallery { background-color: #0288d1; }
+        #preview { max-width: 100%; height: auto; margin-top: 15px; border-radius: 8px; display: none; }
+        #result { margin-top: 20px; text-align: left; padding: 15px; border: 1px solid #ddd; border-radius: 8px; display: none; }
+    </style>
+</head>
+<body>
+
+    <h2>🌱 Crop Doctor</h2>
+    <p>Take a photo of an infected leaf or upload an image from your gallery.</p>
+
+    <!-- Hidden File Inputs -->
+    <!-- 1. Open Phone Camera Directly -->
+    <input type="file" id="cameraInput" accept="image/*" capture="environment" style="display: none;">
+    
+    <!-- 2. Select from Photo Gallery -->
+    <input type="file" id="galleryInput" accept="image/*" style="display: none;">
+
+    <div class="btn-container">
+        <button class="btn btn-camera" onclick="document.getElementById('cameraInput').click()">📸 Take Photo</button>
+        <button class="btn btn-gallery" onclick="document.getElementById('galleryInput').click()">🖼️ Upload from Gallery</button>
+    </div>
+
+    <img id="preview" alt="Leaf Preview">
+    <div id="result"></div>
+
+    <script>
+        const cameraInput = document.getElementById('cameraInput');
+        const galleryInput = document.getElementById('galleryInput');
+        const preview = document.getElementById('preview');
+        const resultDiv = document.getElementById('result');
+
+        cameraInput.addEventListener('change', (e) => handleFile(e.target.files[0]));
+        galleryInput.addEventListener('change', (e) => handleFile(e.target.files[0]));
+
+        function handleFile(file) {
+            if (!file) return;
+
+            // Show local image preview
+            preview.src = URL.createObjectURL(file);
+            preview.style.display = 'block';
+
+            // Send image to Flask API
+            const formData = new FormData();
+            formData.append('file', file);
+
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = "<em>Analyzing leaf image...</em>";
+
+            fetch('/predict', {
+                method: 'POST',
+                body: formData
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    const p = data.prescription;
+                    resultDiv.innerHTML = `
+                        <h3>Disease: ${p.disease_name} (${data.confidence})</h3>
+                        <p><strong>Status:</strong> ${p.status}</p>
+                        <p><strong>Description:</strong> ${p.description}</p>
+                        <p><strong>Organic Remedy:</strong> ${p.organic_remedy}</p>
+                        <p><strong>Chemical Treatment:</strong> ${p.chemical_treatment}</p>
+                        <p><strong>Prevention:</strong> ${p.prevention}</p>
+                    `;
+                } else {
+                    resultDiv.innerHTML = `<p style="color:red;">Error: ${data.error}</p>`;
+                }
+            })
+            .catch(err => {
+                resultDiv.innerHTML = `<p style="color:red;">Failed to connect to API.</p>`;
+            });
+        }
+    </script>
+</body>
+</html>
