@@ -7,12 +7,11 @@ import torch.nn as nn
 from torchvision import models, transforms
 from PIL import Image
 from flask import Flask, request, jsonify, render_template
-from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
 
-# ... existing BASE_DIR logic ...
+# Prevent PyTorch from storing gradients (saves ~40% RAM)
+torch.set_grad_enabled(False)
 
-# Resolve root directory relative to this api/ script
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TEMPLATE_DIR = os.path.join(BASE_DIR, "templates")
 
@@ -29,18 +28,11 @@ model = None
 CLASS_NAMES = []
 PRESCRIPTIONS_DB = {}
 
-# ---------------------------------------------------------
-# 1. Load CSV Prescription Database into Memory
-# ---------------------------------------------------------
+# 1. Load CSV Database
 def load_prescriptions_csv():
     global PRESCRIPTIONS_DB
-    if PRESCRIPTIONS_DB:
+    if PRESCRIPTIONS_DB or not os.path.exists(CSV_PATH):
         return
-
-    if not os.path.exists(CSV_PATH):
-        print(f"Warning: {CSV_PATH} not found.")
-        return
-
     try:
         with open(CSV_PATH, mode='r', encoding='utf-8') as csv_file:
             csv_reader = csv.DictReader(csv_file)
@@ -54,21 +46,17 @@ def load_prescriptions_csv():
                     "chemical_treatment": row.get("chemical_treatment", "N/A"),
                     "prevention": row.get("prevention", "N/A")
                 }
-        print(f"Loaded prescriptions for {len(PRESCRIPTIONS_DB)} classes from CSV.")
     except Exception as e:
         print(f"Error reading CSV: {e}")
 
-# ---------------------------------------------------------
-# 2. Model Initialization & Dynamic Downloader
-# ---------------------------------------------------------
+# 2. Model Initialization
 def download_model_if_needed():
     if not os.path.exists(MODEL_PATH):
-        print("Model file missing. Downloading from GitHub LFS...")
+        print("Model file missing. Downloading...")
         os.makedirs(os.path.dirname(MODEL_PATH) if os.path.dirname(MODEL_PATH) else '.', exist_ok=True)
         urllib.request.urlretrieve(MODEL_URL, MODEL_PATH)
-        print("Model downloaded successfully.")
 
-def load_model():
+def init_app():
     global model, CLASS_NAMES
     if model is not None:
         return
@@ -95,6 +83,10 @@ def load_model():
         
     model.to(DEVICE)
     model.eval()
+    print("Model successfully loaded in memory!")
+
+# Pre-load immediately on server startup
+init_app()
 
 # Preprocessing Pipeline
 transform = transforms.Compose([
@@ -103,26 +95,12 @@ transform = transforms.Compose([
     transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 ])
 
-# ---------------------------------------------------------
-# 3. Flask API Endpoints
-# ---------------------------------------------------------
 @app.route('/', methods=['GET'])
 def home():
     try:
         return render_template('index.html')
     except Exception as e:
-        return jsonify({
-            "status": "ready",
-            "message": "Crop Doctor API operational. Send POST requests to /predict.",
-            "template_error": str(e)
-        }), 200
-
-@app.route('/health', methods=['GET'])
-def health_check():
-    return jsonify({
-        "status": "ready",
-        "message": "33-Class Plant Disease API with CSV Prescription Lookup running."
-    }), 200
+        return jsonify({"status": "ready", "error": str(e)}), 200
 
 @app.route('/predict', methods=['POST'])
 def predict():
@@ -134,17 +112,13 @@ def predict():
         return jsonify({"error": "Empty filename"}), 400
 
     try:
-        load_model()
-        
         image_bytes = file.read()
         image = Image.open(io.BytesIO(image_bytes)).convert('RGB')
-        
         tensor = transform(image).unsqueeze(0).to(DEVICE)
 
-        with torch.no_grad():
-            outputs = model(tensor)
-            probabilities = torch.softmax(outputs, dim=1)[0]
-            confidence, predicted_idx = torch.max(probabilities, 0)
+        outputs = model(tensor)
+        probabilities = torch.softmax(outputs, dim=1)[0]
+        confidence, predicted_idx = torch.max(probabilities, 0)
 
         class_index = predicted_idx.item()
         raw_class_name = CLASS_NAMES[class_index]
