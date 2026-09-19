@@ -1,7 +1,5 @@
---extra-index-url https://download.pytorch.org/whl/cpu
 numpy<2.0.0
-torch==2.2.2+cpu
-torchvision==0.17.2+cpu
+onnxruntime==1.17.1
 Flask==3.0.0
 flask-cors==4.0.0
 Pillow==10.2.0
