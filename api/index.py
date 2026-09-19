@@ -20,15 +20,30 @@ session = None
 PRESCRIPTIONS_DB = {}
 CLASS_NAMES = []
 
+import torch
+
 def load_prescriptions_csv():
     global PRESCRIPTIONS_DB, CLASS_NAMES
     if PRESCRIPTIONS_DB or not os.path.exists(CSV_PATH):
         return
     try:
+        # 1. First attempt to pull true class names directly from PyTorch checkpoint if present
+        PTH_PATH = os.path.join(BASE_DIR, "unified_plant_resnet50.pth")
+        if os.path.exists(PTH_PATH):
+            try:
+                checkpoint = torch.load(PTH_PATH, map_location="cpu")
+                if isinstance(checkpoint, dict) and 'class_names' in checkpoint:
+                    CLASS_NAMES = checkpoint['class_names']
+            except Exception as e:
+                print(f"Could not load class_names from pth: {e}")
+
+        # 2. Load CSV prescription mappings
         with open(CSV_PATH, mode='r', encoding='utf-8') as csv_file:
             csv_reader = csv.DictReader(csv_file)
+            csv_classes = []
             for row in csv_reader:
                 raw_class = row["raw_class"].strip()
+                csv_classes.append(raw_class)
                 PRESCRIPTIONS_DB[raw_class] = {
                     "status": row.get("status", "Unknown"),
                     "disease_name": row.get("disease_name", raw_class),
@@ -37,9 +52,13 @@ def load_prescriptions_csv():
                     "chemical_treatment": row.get("chemical_treatment", "N/A"),
                     "prevention": row.get("prevention", "N/A")
                 }
-        CLASS_NAMES = list(PRESCRIPTIONS_DB.keys())
+        
+        # Fallback to CSV class order if class_names wasn't stored in checkpoint
+        if not CLASS_NAMES:
+            CLASS_NAMES = csv_classes
+
     except Exception as e:
-        print(f"Error reading CSV: {e}")
+        print(f"Error reading CSV/PTH: {e}")
 
 def get_onnx_session():
     global session
