@@ -3,83 +3,93 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Crop Doctor - Plant Disease Identifier</title>
+    <title>Crop Doctor</title>
     <style>
-        body { font-family: Arial, sans-serif; max-width: 600px; margin: 20px auto; padding: 20px; text-align: center; }
-        .btn-container { display: flex; gap: 10px; justify-content: center; margin: 20px 0; }
-        .btn { padding: 12px 20px; font-size: 16px; border: none; border-radius: 6px; cursor: pointer; color: white; }
-        .btn-camera { background-color: #2e7d32; }
-        .btn-gallery { background-color: #0288d1; }
+        body { font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; text-align: center; }
+        .btn-container { margin: 20px 0; display: flex; gap: 10px; justify-content: center; }
+        button, label.btn { padding: 12px 20px; background-color: #2e7d32; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 16px; text-decoration: none; display: inline-block; }
+        input[type="file"] { display: none; }
         #preview { max-width: 100%; height: auto; margin-top: 15px; border-radius: 8px; display: none; }
-        #result { margin-top: 20px; text-align: left; padding: 15px; border: 1px solid #ddd; border-radius: 8px; display: none; }
+        #result { margin-top: 20px; text-align: left; background: #f5f5f5; padding: 15px; border-radius: 8px; display: none; }
+        .loading { color: #f39c12; font-weight: bold; margin-top: 15px; display: none; }
+        .error { color: #d32f2f; font-weight: bold; margin-top: 15px; }
     </style>
 </head>
 <body>
 
-    <h2>🌱 Crop Doctor</h2>
-    <p>Take a photo of an infected leaf or upload an image from your gallery.</p>
-
-    <!-- Hidden File Inputs -->
-    <!-- 1. Open Phone Camera Directly -->
-    <input type="file" id="cameraInput" accept="image/*" capture="environment" style="display: none;">
-    
-    <!-- 2. Select from Photo Gallery -->
-    <input type="file" id="galleryInput" accept="image/*" style="display: none;">
+    <h1>🌱 Crop Doctor</h1>
+    <p>Upload or capture a crop leaf image for instant diagnosis.</p>
 
     <div class="btn-container">
-        <button class="btn btn-camera" onclick="document.getElementById('cameraInput').click()">📸 Take Photo</button>
-        <button class="btn btn-gallery" onclick="document.getElementById('galleryInput').click()">🖼️ Upload from Gallery</button>
+        <!-- Gallery Upload -->
+        <label for="gallery-input" class="btn">📁 Choose from Gallery</label>
+        <input type="file" id="gallery-input" accept="image/*" onchange="handleImageSelect(event)">
+
+        <!-- Camera Capture -->
+        <label for="camera-input" class="btn">📷 Take Photo</label>
+        <input type="file" id="camera-input" accept="image/*" capture="environment" onchange="handleImageSelect(event)">
     </div>
 
-    <img id="preview" alt="Leaf Preview">
+    <img id="preview" alt="Selected Leaf Image">
+    <div id="loading" class="loading">Analyzing plant image...</div>
     <div id="result"></div>
 
     <script>
-        const cameraInput = document.getElementById('cameraInput');
-        const galleryInput = document.getElementById('galleryInput');
-        const preview = document.getElementById('preview');
-        const resultDiv = document.getElementById('result');
-
-        cameraInput.addEventListener('change', (e) => handleFile(e.target.files[0]));
-        galleryInput.addEventListener('change', (e) => handleFile(e.target.files[0]));
-
-        function handleFile(file) {
+        async function handleImageSelect(event) {
+            const file = event.target.files[0];
             if (!file) return;
 
-            // Show local image preview
+            // Display preview
+            const preview = document.getElementById('preview');
             preview.src = URL.createObjectURL(file);
             preview.style.display = 'block';
 
-            // Send image to Flask API
+            // Reset status views
+            const resultDiv = document.getElementById('result');
+            const loadingDiv = document.getElementById('loading');
+            resultDiv.style.display = 'none';
+            loadingDiv.style.display = 'block';
+
             const formData = new FormData();
             formData.append('file', file);
 
-            resultDiv.style.display = 'block';
-            resultDiv.innerHTML = "<em>Analyzing leaf image...</em>";
+            try {
+                // Use relative route '/predict' so it automatically targets your live Render host
+                const response = await fetch('/predict', {
+                    method: 'POST',
+                    body: formData
+                });
 
-            fetch('/predict', {
-                method: 'POST',
-                body: formData
-            })
-            .then(res => res.json())
-            .then(data => {
-                if (data.success) {
-                    const p = data.prescription;
-                    resultDiv.innerHTML = `
-                        <h3>Disease: ${p.disease_name} (${data.confidence})</h3>
-                        <p><strong>Status:</strong> ${p.status}</p>
-                        <p><strong>Description:</strong> ${p.description}</p>
-                        <p><strong>Organic Remedy:</strong> ${p.organic_remedy}</p>
-                        <p><strong>Chemical Treatment:</strong> ${p.chemical_treatment}</p>
-                        <p><strong>Prevention:</strong> ${p.prevention}</p>
-                    `;
-                } else {
-                    resultDiv.innerHTML = `<p style="color:red;">Error: ${data.error}</p>`;
+                if (!response.ok) {
+                    throw new Error(`Server returned status ${response.status}`);
                 }
-            })
-            .catch(err => {
-                resultDiv.innerHTML = `<p style="color:red;">Failed to connect to API.</p>`;
-            });
+
+                const data = await response.json();
+                loadingDiv.style.display = 'none';
+
+                if (data.success) {
+                    const rx = data.prescription;
+                    resultDiv.innerHTML = `
+                        <h2>Diagnosis Result</h2>
+                        <p><strong>Disease:</strong> ${rx.disease_name}</p>
+                        <p><strong>Confidence:</strong> ${data.confidence}</p>
+                        <p><strong>Status:</strong> ${rx.status}</p>
+                        <hr>
+                        <p><strong>Description:</strong> ${rx.description}</p>
+                        <p><strong>Organic Remedy:</strong> ${rx.organic_remedy}</p>
+                        <p><strong>Chemical Treatment:</strong> ${rx.chemical_treatment}</p>
+                        <p><strong>Prevention:</strong> ${rx.prevention}</p>
+                    `;
+                    resultDiv.style.display = 'block';
+                } else {
+                    resultDiv.innerHTML = `<p class="error">Error: ${data.error || 'Prediction failed'}</p>`;
+                    resultDiv.style.display = 'block';
+                }
+            } catch (err) {
+                loadingDiv.style.display = 'none';
+                resultDiv.innerHTML = `<p class="error">Failed to connect to API: ${err.message}</p>`;
+                resultDiv.style.display = 'block';
+            }
         }
     </script>
 </body>
