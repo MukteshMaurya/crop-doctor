@@ -1,23 +1,28 @@
 import io
 import os
 import csv
+import urllib.request
 import torch
 import torch.nn as nn
 from torchvision import models, transforms
 from PIL import Image
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template
 
-from flask import render_template 
-
-app = Flask(__name__)
-
-@app.route('/', methods=['GET'])
-def home():
-    return render_template('index.html')
+app = Flask(__name__, template_folder='../templates')
 
 DEVICE = torch.device("cpu")
-MODEL_PATH = "unified_plant_resnet50.pth"
-CSV_PATH = "prescriptions.csv"
+
+# Determine model path dynamically (use /tmp on Vercel to bypass bundle limits)
+if os.getenv("VERCEL"):
+    MODEL_PATH = "/tmp/unified_plant_resnet50.pth"
+else:
+    MODEL_PATH = "unified_plant_resnet50.pth"
+
+MODEL_URL = "https://media.githubusercontent.com/media/MukteshMaurya/crop-doctor/main/unified_plant_resnet50.pth"
+
+# Resolve CSV path relative to project root
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) if os.getenv("VERCEL") else "."
+CSV_PATH = os.path.join(BASE_DIR, "prescriptions.csv") if os.getenv("VERCEL") else "prescriptions.csv"
 
 model = None
 CLASS_NAMES = []
@@ -35,34 +40,47 @@ def load_prescriptions_csv():
         print(f"Warning: {CSV_PATH} not found.")
         return
 
-    with open(CSV_PATH, mode='r', encoding='utf-8') as csv_file:
-        csv_reader = csv.DictReader(csv_file)
-        for row in csv_reader:
-            raw_class = row["raw_class"].strip()
-            PRESCRIPTIONS_DB[raw_class] = {
-                "status": row.get("status", "Unknown"),
-                "disease_name": row.get("disease_name", raw_class),
-                "description": row.get("description", "N/A"),
-                "organic_remedy": row.get("organic_remedy", "N/A"),
-                "chemical_treatment": row.get("chemical_treatment", "N/A"),
-                "prevention": row.get("prevention", "N/A")
-            }
-    print(f"Loaded prescriptions for {len(PRESCRIPTIONS_DB)} classes from CSV.")
+    try:
+        with open(CSV_PATH, mode='r', encoding='utf-8') as csv_file:
+            csv_reader = csv.DictReader(csv_file)
+            for row in csv_reader:
+                raw_class = row["raw_class"].strip()
+                PRESCRIPTIONS_DB[raw_class] = {
+                    "status": row.get("status", "Unknown"),
+                    "disease_name": row.get("disease_name", raw_class),
+                    "description": row.get("description", "N/A"),
+                    "organic_remedy": row.get("organic_remedy", "N/A"),
+                    "chemical_treatment": row.get("chemical_treatment", "N/A"),
+                    "prevention": row.get("prevention", "N/A")
+                }
+        print(f"Loaded prescriptions for {len(PRESCRIPTIONS_DB)} classes from CSV.")
+    except Exception as e:
+        print(f"Error reading CSV: {e}")
 
 # ---------------------------------------------------------
-# 2. Model Initialization
+# 2. Model Initialization & Dynamic Downloader
 # ---------------------------------------------------------
+def download_model_if_needed():
+    if not os.path.exists(MODEL_PATH):
+        print("Model file missing. Downloading from GitHub LFS...")
+        os.makedirs(os.path.dirname(MODEL_PATH) if os.path.dirname(MODEL_PATH) else '.', exist_ok=True)
+        urllib.request.urlretrieve(MODEL_URL, MODEL_PATH)
+        print("Model downloaded successfully.")
+
 def load_model():
     global model, CLASS_NAMES
     if model is not None:
         return
 
-    # Load CSV data first
+    # 1. Load CSV database
     load_prescriptions_csv()
 
+    # 2. Download model to /tmp on Vercel cold-start if missing
+    download_model_if_needed()
+
+    # 3. Load weights
     checkpoint = torch.load(MODEL_PATH, map_location=DEVICE)
     
-    # Read embedded class names from PyTorch checkpoint or fallback to CSV keys
     if isinstance(checkpoint, dict) and 'class_names' in checkpoint:
         CLASS_NAMES = checkpoint['class_names']
     else:
@@ -92,6 +110,16 @@ transform = transforms.Compose([
 # 3. Flask API Endpoints
 # ---------------------------------------------------------
 @app.route('/', methods=['GET'])
+def home():
+    try:
+        return render_template('index.html')
+    except Exception:
+        return jsonify({
+            "status": "ready",
+            "message": "Crop Doctor API operational. Send POST requests to /predict."
+        }), 200
+
+@app.route('/health', methods=['GET'])
 def health_check():
     return jsonify({
         "status": "ready",
