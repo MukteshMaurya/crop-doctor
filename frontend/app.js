@@ -61,6 +61,33 @@
     return (value * 100).toFixed(1) + "%";
   }
 
+  // Configuration problems that make every request fail.
+  // Returns a message string, or null when the config is usable.
+  function configProblem() {
+    if (!API_BASE_URL) {
+      return (
+        "The backend URL is not configured. Set API_BASE_URL in " +
+        "frontend/config.js to the backend URL."
+      );
+    }
+    if (location.protocol === "file:") {
+      return (
+        "This page was opened as a local file (file://). Browsers do not " +
+        "send an Origin header from file:// pages, so the backend cannot " +
+        "allow this site. Serve the frontend over http://localhost " +
+        "(for example with VS Code Live Server) instead."
+      );
+    }
+    if (location.protocol === "https:" && API_BASE_URL.indexOf("http://") === 0) {
+      return (
+        "This page is served over HTTPS but the backend URL in config.js " +
+        "starts with http://. Browsers block mixed content. Use an HTTPS " +
+        "backend URL."
+      );
+    }
+    return null;
+  }
+
   // ---------- File selection ----------
 
   function handleFile(file) {
@@ -165,6 +192,12 @@
       return;
     }
 
+    var problem = configProblem();
+    if (problem) {
+      showError(problem);
+      return;
+    }
+
     isSubmitting = true;
     clearError();
     setLoading(true);
@@ -181,34 +214,59 @@
 
     fetch(request)
       .then(function (response) {
-        return response.json().then(function (body) {
-          return { status: response.status, body: body };
+        // Read as text first: response.json() would reject on a
+        // non-JSON body (e.g. a proxy error page), and that
+        // rejection would be indistinguishable from a network error.
+        return response.text().then(function (text) {
+          var body = null;
+          try {
+            body = text ? JSON.parse(text) : null;
+          } catch (parseError) {
+            body = null;
+          }
+          return { status: response.status, body: body, rawText: body ? null : text };
         });
       })
       .then(function (result) {
-        if (result.status === 200 && result.body.success) {
+        if (result.status === 200 && result.body && result.body.success) {
           renderResult(result.body);
           resetBtn.hidden = false;
         } else if (result.status === 413) {
           showError("The image is too large. Maximum size is 10 MB.");
         } else if (result.status === 400) {
-          showError("Invalid image: " + (result.body.error || "please upload a clear leaf photo."));
-        } else if (result.status === 503) {
           showError(
-            "The AI model is not available on the server right now. " +
-            "It may still be starting up (cold start) — please try again in a moment."
+            "Invalid image: " +
+            ((result.body && result.body.error) || "please upload a clear leaf photo.")
+          );
+        } else if (result.status === 502 || result.status === 503) {
+          showError(
+            "The AI backend is unavailable right now (HTTP " + result.status + "). " +
+            "It may still be starting up (cold start) or restarting — please try again in a moment."
           );
         } else if (result.status >= 500) {
-          showError("The server encountered an error. Please try again later.");
+          showError(
+            "The server encountered an error (HTTP " + result.status + "). Please try again later."
+          );
+        } else if (result.body && result.body.error) {
+          showError(result.body.error);
+        } else if (result.rawText) {
+          showError(
+            "The backend returned an unexpected, non-JSON response (HTTP " + result.status + "). " +
+            "A proxy or gateway may be intercepting the request — check the backend URL in config.js."
+          );
         } else {
-          showError(result.body.error || "Prediction failed. Please try another image.");
+          showError("Prediction failed. Please try another image.");
         }
       })
       .catch(function () {
+        // fetch itself rejected: network failure, DNS problem, or the
+        // browser blocked the response (CORS). All of these look the
+        // same to JavaScript, so show every diagnostic at once.
         showError(
-          "Could not reach the AI backend. Check your connection, make sure the " +
-          "backend URL is configured correctly (config.js), and verify the backend " +
-          "is running and allows requests from this site (CORS)."
+          "Could not reach the AI backend at " + PREDICT_ENDPOINT + ". " +
+          "This usually means the request was blocked (CORS), the backend is down, " +
+          "or the URL in config.js is wrong. This site's origin is " + location.origin +
+          " — the backend's FRONTEND_ORIGIN setting must include exactly that origin."
         );
       })
       .finally(function () {

@@ -36,6 +36,15 @@ service = get_model_service()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Load the trained model once at startup (never retrain)."""
+    origins = _cors_origins()
+    logger.info("CORS allowlist (effective FRONTEND_ORIGIN): %s", origins)
+    if not os.getenv("FRONTEND_ORIGIN", "").strip():
+        logger.warning(
+            "FRONTEND_ORIGIN is not set — only local development "
+            "origins (localhost/127.0.0.1) are allowed. Set "
+            "FRONTEND_ORIGIN to the deployed frontend URL to allow "
+            "browser access in production."
+        )
     service.load()
     yield
 
@@ -124,6 +133,7 @@ def health():
             backend=service.backend,
             model_path=service.model_path,
             num_classes=service.num_classes,
+            cors_origins=_cors_origins(),
         )
     # Degraded: the API is up but the model is unusable, so the
     # health check must fail (HTTP 503) for load balancers and

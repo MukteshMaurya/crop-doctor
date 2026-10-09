@@ -32,6 +32,7 @@ class HealthResponse(BaseModel):
     model_path: str
     num_classes: Optional[int] = None
     error: Optional[str] = None
+    cors_origins: Optional[List[str]] = None
 
 
 class InfoResponse(BaseModel):

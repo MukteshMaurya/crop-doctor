@@ -33,6 +33,36 @@ def test_health_ok(client):
     assert data["architecture"] == "resnet50"
     assert data["num_classes"] == len(TEST_CLASSES)
     assert data["model_path"]
+    # The effective CORS allowlist must be visible so browser
+    # connection problems can be diagnosed from one endpoint.
+    assert isinstance(data["cors_origins"], list)
+    assert data["cors_origins"]
+
+
+def test_health_exposes_dev_default_origins(client, monkeypatch):
+    monkeypatch.delenv("FRONTEND_ORIGIN", raising=False)
+    response = client.get("/health")
+    assert response.status_code == 200
+    origins = response.json()["cors_origins"]
+    assert "http://localhost:5500" in origins
+    assert "http://127.0.0.1:5500" in origins
+    for origin in origins:
+        assert origin.startswith("http://localhost") or origin.startswith(
+            "http://127.0.0.1"
+        )
+
+
+def test_health_reports_configured_frontend_origin(tiny_checkpoint, monkeypatch):
+    monkeypatch.setenv("MODEL_PATH", tiny_checkpoint)
+    monkeypatch.setenv("FRONTEND_ORIGIN", "https://app.example.com")
+    service = __import__("app.model_loader", fromlist=["get_model_service"]).get_model_service()
+    service.loaded = False
+    from app.main import app
+
+    with TestClient(app) as test_client:
+        response = test_client.get("/health")
+    assert response.status_code == 200
+    assert response.json()["cors_origins"] == ["https://app.example.com"]
 
 
 def test_health_fails_when_model_missing(broken_client):
@@ -169,3 +199,19 @@ def test_cors_env_var_origins(tiny_checkpoint, monkeypatch):
         "https://app.example.com",
         "https://staging.example.com",
     ]
+
+
+def test_cors_empty_env_var_falls_back_to_dev_defaults(monkeypatch):
+    monkeypatch.setenv("FRONTEND_ORIGIN", "   ")
+    from app.main import _cors_origins
+
+    origins = _cors_origins()
+    assert origins
+    assert "http://localhost:5500" in origins
+
+
+def test_cors_blank_string_is_ignored(monkeypatch):
+    monkeypatch.setenv("FRONTEND_ORIGIN", " , https://app.example.com , ")
+    from app.main import _cors_origins
+
+    assert _cors_origins() == ["https://app.example.com"]

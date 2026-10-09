@@ -13,8 +13,14 @@ services:
       pip install --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
+      # IMPORTANT: set this on the Render service (Environment tab) to the
+      # exact origin of the deployed frontend, e.g.
+      #   https://crop-doctor.vercel.app
+      # Only that origin may call this API from a browser. Leaving it empty
+      # restricts access to local development servers (localhost/127.0.0.1).
+      # Do NOT paste a wildcard ("*") here.
       - key: FRONTEND_ORIGIN
-        value: https://YOUR-VERCEL-FRONTEND.vercel.app
+        value: ""
       - key: MODEL_PATH
         value: model_assets/unified_plant_resnet50.onnx
       - key: DEVICE
