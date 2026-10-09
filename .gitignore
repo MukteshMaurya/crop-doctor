@@ -1,0 +1,25 @@
+# Ignore Python artifacts and environments
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+env/
+
+# Ignore local environment files and logs
+.env
+.env.*
+!.env.example
+*.log
+
+# Ignore OS/editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Gradio / notebook artifacts
+.gradio/
+*.ipynb_checkpoints/

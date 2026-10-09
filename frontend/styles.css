@@ -1,0 +1,395 @@
+/* AI Plant Disease Detector — agricultural green theme */
+
+:root {
+  --green-900: #1b5e20;
+  --green-700: #2e7d32;
+  --green-500: #43a047;
+  --green-300: #a5d6a7;
+  --green-100: #e8f5e9;
+  --green-50: #f4faf4;
+  --text-dark: #1f2d1f;
+  --text-muted: #5a6b5a;
+  --danger: #c62828;
+  --danger-bg: #fdecea;
+  --card-shadow: 0 4px 16px rgba(27, 94, 32, 0.12);
+  --radius: 14px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  background: linear-gradient(160deg, var(--green-50), #ffffff 60%);
+  color: var(--text-dark);
+  line-height: 1.55;
+}
+
+.container {
+  width: min(960px, 100% - 2rem);
+  margin-inline: auto;
+}
+
+/* ---------- Header ---------- */
+
+.site-header {
+  background: linear-gradient(135deg, var(--green-700), var(--green-900));
+  color: #fff;
+  padding: 2.25rem 0 2rem;
+  text-align: center;
+}
+
+.site-header h1 {
+  margin: 0 0 0.35rem;
+  font-size: clamp(1.6rem, 4vw, 2.4rem);
+  letter-spacing: 0.2px;
+}
+
+.tagline {
+  margin: 0;
+  opacity: 0.92;
+  font-size: 1.02rem;
+}
+
+/* ---------- Cards ---------- */
+
+.card {
+  background: #fff;
+  border-radius: var(--radius);
+  box-shadow: var(--card-shadow);
+  padding: 1.5rem;
+  margin-top: 1.5rem;
+}
+
+.card h2 {
+  margin-top: 0;
+  color: var(--green-900);
+  font-size: 1.25rem;
+}
+
+/* ---------- Intro ---------- */
+
+.steps {
+  margin: 0.5rem 0 1rem 1.2rem;
+}
+
+.steps li {
+  margin-bottom: 0.3rem;
+}
+
+.model-note {
+  background: var(--green-100);
+  border-left: 4px solid var(--green-500);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  font-size: 0.95rem;
+  color: var(--text-dark);
+}
+
+.model-note code {
+  background: #fff;
+  border-radius: 4px;
+  padding: 0 0.3rem;
+}
+
+/* ---------- Dropzone ---------- */
+
+.dropzone {
+  border: 2px dashed var(--green-300);
+  border-radius: var(--radius);
+  background: var(--green-50);
+  padding: 2.25rem 1rem;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.dropzone:hover,
+.dropzone:focus-visible,
+.dropzone.dragover {
+  border-color: var(--green-500);
+  background: var(--green-100);
+  outline: none;
+}
+
+.leaf-icon {
+  width: 46px;
+  height: 46px;
+  fill: var(--green-700);
+}
+
+.dropzone-title {
+  margin: 0.6rem 0 0.2rem;
+  font-weight: 600;
+  color: var(--green-900);
+}
+
+.dropzone-subtitle {
+  margin: 0.2rem 0;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.dropzone-hint {
+  margin: 0.7rem 0 0;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+/* ---------- Buttons ---------- */
+
+.btn {
+  font: inherit;
+  font-weight: 600;
+  border: none;
+  border-radius: 10px;
+  padding: 0.7rem 1.4rem;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.1s, opacity 0.2s;
+}
+
+.btn:active {
+  transform: translateY(1px);
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--green-700);
+  color: #fff;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--green-900);
+}
+
+.btn-secondary {
+  background: #fff;
+  color: var(--green-900);
+  border: 1.5px solid var(--green-500);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--green-100);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: center;
+  margin-top: 1.25rem;
+}
+
+/* ---------- Preview ---------- */
+
+.preview-area {
+  margin-top: 1.25rem;
+  text-align: center;
+}
+
+.preview-area img {
+  max-width: 100%;
+  max-height: 320px;
+  border-radius: var(--radius);
+  object-fit: contain;
+  box-shadow: var(--card-shadow);
+}
+
+.file-name {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
+/* ---------- Loading ---------- */
+
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+  color: var(--green-900);
+  font-weight: 600;
+}
+
+.spinner {
+  width: 22px;
+  height: 22px;
+  border: 3px solid var(--green-300);
+  border-top-color: var(--green-700);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---------- Alerts ---------- */
+
+.alert {
+  border-radius: 10px;
+  padding: 0.8rem 1rem;
+  margin-top: 1.25rem;
+  font-size: 0.95rem;
+}
+
+.alert-error {
+  background: var(--danger-bg);
+  border-left: 4px solid var(--danger);
+  color: var(--danger);
+}
+
+/* ---------- Results ---------- */
+
+.result-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.result-label {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-muted);
+}
+
+.result-class {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--green-900);
+  text-transform: capitalize;
+}
+
+.confidence-block {
+  margin-top: 1rem;
+}
+
+.confidence-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.9rem;
+  margin-bottom: 0.3rem;
+  color: var(--text-muted);
+}
+
+.confidence-value {
+  font-weight: 700;
+  color: var(--green-900);
+}
+
+.confidence-bar {
+  height: 10px;
+  border-radius: 999px;
+  background: var(--green-100);
+  overflow: hidden;
+}
+
+.confidence-bar-fill {
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--green-500), var(--green-700));
+  transition: width 0.6s ease;
+}
+
+.top-n-title {
+  margin: 1.25rem 0 0.5rem;
+  font-size: 1rem;
+  color: var(--green-900);
+}
+
+.top-predictions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.top-predictions li {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 0.6rem;
+  background: var(--green-50);
+  border: 1px solid var(--green-100);
+  border-radius: 10px;
+  padding: 0.55rem 0.8rem;
+}
+
+.rank {
+  font-weight: 700;
+  color: var(--green-700);
+  min-width: 1.4rem;
+}
+
+.top-class {
+  text-transform: capitalize;
+  font-weight: 600;
+}
+
+.top-confidence {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+/* ---------- Footer ---------- */
+
+.site-footer {
+  padding: 1.5rem 0 2.5rem;
+}
+
+.disclaimer {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  background: #fff8e1;
+  border-left: 4px solid #f9a825;
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin: 0;
+}
+
+/* ---------- Utilities ---------- */
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ---------- Responsive ---------- */
+
+@media (max-width: 560px) {
+  .card {
+    padding: 1.1rem;
+  }
+
+  .actions {
+    flex-direction: column;
+  }
+
+  .btn {
+    width: 100%;
+  }
+
+  .result-class {
+    font-size: 1.25rem;
+  }
+}

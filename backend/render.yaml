@@ -1,0 +1,21 @@
+# Render deployment configuration for the AI Plant Disease Detector backend.
+#
+# Repo root is expected to be the folder containing this backend/ directory
+# (the folder that also contains frontend/ and the .pth model).
+# Render uploads only the rootDirectory subtree, so the model file must
+# live inside backend/model_assets/ (see model_assets/README.md).
+services:
+  - type: web
+    name: ai-plant-disease-detector-backend
+    rootDirectory: backend
+    plan: starter
+    buildCommand: >
+      pip install --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: FRONTEND_ORIGIN
+        value: https://YOUR-VERCEL-FRONTEND.vercel.app
+      - key: MODEL_PATH
+        value: model_assets/unified_plant_resnet50.pth
+      - key: DEVICE
+        value: cpu
