@@ -299,3 +299,139 @@ The original checkpoint is preserved untouched either way.
   lean-copy option in Phase 5 if LFS limits matter.
 - Render/Vercel/GitHub push could not be executed by the agent
   (no credentials); those steps are documented for the user.
+
+---
+
+## Render OOM Hotfix (Phase 6) ?
+
+**Objective:** Fix the Render deployment failure
+("Build successful" but "No open ports detected"
+and "Out of memory (used over 512Mi)").
+
+### Root cause (measured, not guessed)
+
+The failure occurs during **model loading at
+application startup**, before uvicorn ever binds
+the port — which is why Render reported both
+"No open ports detected" and the OOM kill.
+
+Peak RSS measured in fresh processes
+(psutil, Python 3.12, torch 2.13.0+cpu):
+
+| Loading approach | Peak RSS |
+| --- | --- |
+| Legacy: `torch.load` of the 283 MB checkpoint (includes ~170 MB Adam `optimizer_state_dict`) ? build model ? `load_state_dict` | **667 MB** ? the failure |
+| PyTorch fallback: mmap load ? build model first ? `load_state_dict` ? free checkpoint | 466 MB (bare process; ~505 MB with uvicorn/FastAPI) |
+| **ONNX Runtime (new production path)**: no torch import, 94 MB ONNX model | **186 MB** (full server stack) |
+
+The original checkpoint's `optimizer_state_dict`
+(Adam moments, ~170 MB) is never used at inference
+but was fully deserialized by `torch.load` on top of
+PyTorch's ~275 MB import cost, pushing the process
+past the 512 MB limit during startup.
+
+### Changes made
+
+**Model artifacts (`backend/model_assets/`)** — same
+trained weights in three formats, model never retrained:
+- `unified_plant_resnet50.onnx` (94.1 MB, NEW) —
+  ONNX export of the trained weights; class names and
+  architecture embedded as ONNX metadata. Regenerate
+  with `python tools/export_onnx.py`.
+- `unified_plant_resnet50_lean.pth` (94.5 MB, NEW) —
+  checkpoint without the unused optimizer state
+  (weights verified byte-identical to the original).
+- `unified_plant_resnet50.pth` (283 MB) — original
+  checkpoint, kept as the PyTorch fallback source.
+
+**Code:**
+- `app/model_loader.py` — dual-path loader.
+  `MODEL_PATH` extension selects the backend:
+  `.onnx` ? ONNX Runtime (CPU, lazy import so torch
+  is never imported); `.pth/.pt/.ckpt` ? PyTorch
+  fallback with `mmap=True`, build-model-first,
+  immediate `del` + `gc.collect()`. ONNX without
+  class metadata fails loudly (health ? 503) instead
+  of guessing. Model still loaded once per process
+  from the FastAPI lifespan (never at module import),
+  and `/health` still reports degraded/503 until the
+  model is ready.
+- `app/preprocessing.py` — `preprocess_numpy`
+  (PIL+numpy, ONNX path) reproduces the exact
+  training pipeline: Resize((224,224)) bilinear ?
+  ToTensor ? Normalize(ImageNet). Parity-tested
+  against the torchvision pipeline (max diff < 1e-5).
+- `app/predictor.py` — branches on the loaded
+  backend; ONNX uses numpy softmax, PyTorch keeps
+  `torch.inference_mode()` + `F.softmax`. Both
+  return the same `PredictionResult`.
+- `app/schemas.py` / `app/main.py` — `/health`
+  now also reports `backend` ("onnx"/"pytorch").
+  API endpoints and response contract unchanged.
+
+**Deployment files:**
+- `requirements.txt` — added `onnxruntime` and
+  `numpy`; `uvicorn[standard]` ? plain `uvicorn`
+  (drops uvloop/httptools/watchfiles/websockets
+  extras to save memory); `pytest`/`httpx` moved to
+  the new `requirements-dev.txt` (test-only, not
+  needed on Render). torch/torchvision retained for
+  the fallback path (installed but not imported by
+  the ONNX path, so they cost no runtime memory).
+- `render.yaml` — `MODEL_PATH` now
+  `model_assets/unified_plant_resnet50.onnx`;
+  added `ORT_INTRA_OP_THREADS: "2"`. Start command
+  (`uvicorn app.main:app --host 0.0.0.0 --port $PORT`)
+  unchanged — the `$PORT` binding is correct.
+- `.gitattributes` — `*.onnx` tracked with Git LFS.
+
+### Test results (actual)
+
+`pytest tests -v` ? **36 passed, 0 failed**
+(37 collected; 1 production test auto-skips only
+when its model file is absent — it ran and passed
+here). New coverage:
+- ONNX health reports `backend: "onnx"`, CPU, 17 classes
+- ONNX prediction structure, top-3 ordering, PNG input
+- ONNX missing class metadata ? 503, no false healthy status
+- ONNX missing file / unsupported extension ? 503 with clear error
+- **ONNX ? PyTorch parity** (tiny weights and production
+  model): identical predicted class, confidence difference
+  = 1e-4 (measured = 1.2e-07 on real images)
+- numpy ? torchvision preprocessing parity (4 image
+  shapes/colors, max diff < 1e-5)
+- Production ONNX serves the real API end-to-end
+  (health + classes + predict)
+
+Live-server verification (uvicorn + production ONNX):
+- `GET /health` ? `{"status":"healthy","model_loaded":true,
+  "backend":"onnx","num_classes":17,...}`
+- `POST /api/predict` (wheat.jpg) ? `wheat`,
+  confidence 0.568637 — identical to the PyTorch path
+- Server peak RSS after startup, load and inference:
+  **186 MB**; CORS header echoed for the frontend origin
+
+### Deployment recommendation (requirement 14)
+
+- **512 MB Render instance (Free/Standard): sufficient
+  with the ONNX path** — measured ~186 MB peak, ~60%
+  headroom for request handling. This was previously
+  impossible (667 MB peak).
+- **PyTorch fallback needs a 1 GB+ instance** — it
+  peaks at ~466 MB bare / ~505 MB with the server
+  stack, which does not reliably fit 512 MB. Keep
+  `MODEL_PATH` on the `.onnx` file in production.
+- If even 512 MB is ever tight, quantizing the ONNX
+  model to int8 (~47 MB, ~90 MB RSS) is the next
+  step — not needed today.
+
+### Remaining limitations
+
+- ONNX Runtime is CPU-only; the PyTorch fallback
+  retains optional CUDA support via `DEVICE=cuda`.
+- The ONNX file must be regenerated with
+  `tools/export_onnx.py` if the model is ever
+  retrained (metadata carries the class mapping).
+- The 283 MB original checkpoint remains in the repo
+  (LFS) for provenance/fallback; it is no longer
+  loaded by default.

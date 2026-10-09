@@ -16,6 +16,8 @@ services:
       - key: FRONTEND_ORIGIN
         value: https://YOUR-VERCEL-FRONTEND.vercel.app
       - key: MODEL_PATH
-        value: model_assets/unified_plant_resnet50.pth
+        value: model_assets/unified_plant_resnet50.onnx
       - key: DEVICE
         value: cpu
+      - key: ORT_INTRA_OP_THREADS
+        value: "2"

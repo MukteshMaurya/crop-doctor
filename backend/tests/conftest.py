@@ -1,7 +1,9 @@
-"""Shared fixtures: build a tiny ResNet50 checkpoint so tests exercise
-the real model-loading and inference code paths without the 270 MB
-production file."""
+"""Shared fixtures: build a tiny ResNet50 checkpoint (and
+an ONNX export of the same weights) so tests exercise the
+real model-loading and inference code paths without the
+production model files."""
 
+import json
 import os
 import sys
 
@@ -37,12 +39,83 @@ def tiny_checkpoint(tmp_path_factory):
     return str(path)
 
 
+@pytest.fixture(scope="session")
+def tiny_onnx(tiny_checkpoint, tmp_path_factory):
+    """Export the same tiny weights to ONNX with the class
+    mapping embedded as metadata (production format)."""
+    import onnx
+
+    checkpoint = torch.load(
+        tiny_checkpoint, map_location="cpu", weights_only=True
+    )
+    model = models.resnet50(weights=None)
+    model.fc = nn.Linear(
+        model.fc.in_features, len(checkpoint["class_names"])
+    )
+    model.load_state_dict(checkpoint["model_state_dict"])
+    model.eval()
+
+    path = tmp_path_factory.mktemp("models") / "tiny_resnet50.onnx"
+    torch.onnx.export(
+        model,
+        torch.randn(1, 3, 224, 224),
+        str(path),
+        input_names=["input"],
+        output_names=["logits"],
+        dynamic_axes={"input": {0: "batch"}, "logits": {0: "batch"}},
+        opset_version=17,
+        do_constant_folding=True,
+        dynamo=False,
+    )
+
+    onnx_model = onnx.load(str(path))
+    onnx_model.metadata_props.append(
+        onnx.StringStringEntryProto(
+            key="class_names",
+            value=json.dumps(checkpoint["class_names"]),
+        )
+    )
+    onnx_model.metadata_props.append(
+        onnx.StringStringEntryProto(
+            key="num_classes",
+            value=str(len(checkpoint["class_names"])),
+        )
+    )
+    onnx.save(onnx_model, str(path))
+    return str(path)
+
+
+@pytest.fixture(scope="session")
+def tiny_onnx_no_meta(tiny_onnx, tmp_path_factory):
+    """Same ONNX file but with the class metadata removed,
+    to verify the loader fails loudly instead of guessing."""
+    import onnx
+
+    onnx_model = onnx.load(tiny_onnx)
+    del onnx_model.metadata_props[:]
+    path = tmp_path_factory.mktemp("models") / "tiny_no_meta.onnx"
+    onnx.save(onnx_model, str(path))
+    return str(path)
+
+
 @pytest.fixture()
 def client(tiny_checkpoint, monkeypatch):
-    """TestClient with the tiny checkpoint loaded via the real lifespan."""
+    """TestClient with the tiny PyTorch checkpoint loaded
+    via the real lifespan (exercises the fallback path)."""
     monkeypatch.setenv("MODEL_PATH", tiny_checkpoint)
     service = get_model_service()
-    service.loaded = False  # force reload with the new path
+    service.loaded = False
+    with TestClient(app) as test_client:
+        yield test_client
+
+
+@pytest.fixture()
+def onnx_client(tiny_onnx, monkeypatch):
+    """TestClient with the tiny ONNX model loaded via the
+    real lifespan (exercises the production path)."""
+    monkeypatch.setenv("MODEL_PATH", tiny_onnx)
+    service = get_model_service()
+    service.loaded = False
     with TestClient(app) as test_client:
         yield test_client
 

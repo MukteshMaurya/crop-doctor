@@ -121,12 +121,13 @@ def health():
             model_loaded=True,
             device=service.device,
             architecture=ARCHITECTURE,
+            backend=service.backend,
             model_path=service.model_path,
             num_classes=service.num_classes,
         )
     # Degraded: the API is up but the model is unusable, so the
     # health check must fail (HTTP 503) for load balancers and
-    # readiness probes.
+    # readiness probes. Never report a false healthy status.
     return JSONResponse(
         status_code=503,
         content=HealthResponse(
@@ -134,6 +135,7 @@ def health():
             model_loaded=False,
             device=service.device,
             architecture=ARCHITECTURE,
+            backend=None,
             model_path=service.model_path,
             num_classes=None,
             error=service.load_error,

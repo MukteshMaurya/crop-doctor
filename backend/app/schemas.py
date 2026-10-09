@@ -28,6 +28,7 @@ class HealthResponse(BaseModel):
     model_loaded: bool
     device: str
     architecture: str
+    backend: Optional[str] = None
     model_path: str
     num_classes: Optional[int] = None
     error: Optional[str] = None
