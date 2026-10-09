@@ -1,9 +1,9 @@
 # PROJECT_PROGRESS — AI Plant Disease Detector
 
-**Final updated:** Phase 5 preparation complete (local). Render/Vercel
-deployment steps documented below require the repository owner's
-account — they were **not** performed by the agent and are **not**
-claimed as done.
+**Final updated:** Phase 7 complete — connection-error root cause
+found and fixed, deployed. One manual step remains for the
+owner: set `FRONTEND_ORIGIN` on the Render service (see
+Phase 7).
 
 ---
 
@@ -312,7 +312,7 @@ and "Out of memory (used over 512Mi)").
 
 The failure occurs during **model loading at
 application startup**, before uvicorn ever binds
-the port � which is why Render reported both
+the port � which is why Render reported both
 "No open ports detected" and the OOM kill.
 
 Peak RSS measured in fresh processes
@@ -332,20 +332,20 @@ past the 512 MB limit during startup.
 
 ### Changes made
 
-**Model artifacts (`backend/model_assets/`)** � same
+**Model artifacts (`backend/model_assets/`)** � same
 trained weights in three formats, model never retrained:
-- `unified_plant_resnet50.onnx` (94.1 MB, NEW) �
+- `unified_plant_resnet50.onnx` (94.1 MB, NEW) �
   ONNX export of the trained weights; class names and
   architecture embedded as ONNX metadata. Regenerate
   with `python tools/export_onnx.py`.
-- `unified_plant_resnet50_lean.pth` (94.5 MB, NEW) �
+- `unified_plant_resnet50_lean.pth` (94.5 MB, NEW) �
   checkpoint without the unused optimizer state
   (weights verified byte-identical to the original).
-- `unified_plant_resnet50.pth` (283 MB) � original
+- `unified_plant_resnet50.pth` (283 MB) � original
   checkpoint, kept as the PyTorch fallback source.
 
 **Code:**
-- `app/model_loader.py` � dual-path loader.
+- `app/model_loader.py` � dual-path loader.
   `MODEL_PATH` extension selects the backend:
   `.onnx` ? ONNX Runtime (CPU, lazy import so torch
   is never imported); `.pth/.pt/.ckpt` ? PyTorch
@@ -356,21 +356,21 @@ trained weights in three formats, model never retrained:
   from the FastAPI lifespan (never at module import),
   and `/health` still reports degraded/503 until the
   model is ready.
-- `app/preprocessing.py` � `preprocess_numpy`
+- `app/preprocessing.py` � `preprocess_numpy`
   (PIL+numpy, ONNX path) reproduces the exact
   training pipeline: Resize((224,224)) bilinear ?
   ToTensor ? Normalize(ImageNet). Parity-tested
   against the torchvision pipeline (max diff < 1e-5).
-- `app/predictor.py` � branches on the loaded
+- `app/predictor.py` � branches on the loaded
   backend; ONNX uses numpy softmax, PyTorch keeps
   `torch.inference_mode()` + `F.softmax`. Both
   return the same `PredictionResult`.
-- `app/schemas.py` / `app/main.py` � `/health`
+- `app/schemas.py` / `app/main.py` � `/health`
   now also reports `backend` ("onnx"/"pytorch").
   API endpoints and response contract unchanged.
 
 **Deployment files:**
-- `requirements.txt` � added `onnxruntime` and
+- `requirements.txt` � added `onnxruntime` and
   `numpy`; `uvicorn[standard]` ? plain `uvicorn`
   (drops uvloop/httptools/watchfiles/websockets
   extras to save memory); `pytest`/`httpx` moved to
@@ -378,18 +378,18 @@ trained weights in three formats, model never retrained:
   needed on Render). torch/torchvision retained for
   the fallback path (installed but not imported by
   the ONNX path, so they cost no runtime memory).
-- `render.yaml` � `MODEL_PATH` now
+- `render.yaml` � `MODEL_PATH` now
   `model_assets/unified_plant_resnet50.onnx`;
   added `ORT_INTRA_OP_THREADS: "2"`. Start command
   (`uvicorn app.main:app --host 0.0.0.0 --port $PORT`)
-  unchanged � the `$PORT` binding is correct.
-- `.gitattributes` � `*.onnx` tracked with Git LFS.
+  unchanged � the `$PORT` binding is correct.
+- `.gitattributes` � `*.onnx` tracked with Git LFS.
 
 ### Test results (actual)
 
 `pytest tests -v` ? **36 passed, 0 failed**
 (37 collected; 1 production test auto-skips only
-when its model file is absent � it ran and passed
+when its model file is absent � it ran and passed
 here). New coverage:
 - ONNX health reports `backend: "onnx"`, CPU, 17 classes
 - ONNX prediction structure, top-3 ordering, PNG input
@@ -407,23 +407,23 @@ Live-server verification (uvicorn + production ONNX):
 - `GET /health` ? `{"status":"healthy","model_loaded":true,
   "backend":"onnx","num_classes":17,...}`
 - `POST /api/predict` (wheat.jpg) ? `wheat`,
-  confidence 0.568637 � identical to the PyTorch path
+  confidence 0.568637 � identical to the PyTorch path
 - Server peak RSS after startup, load and inference:
   **186 MB**; CORS header echoed for the frontend origin
 
 ### Deployment recommendation (requirement 14)
 
 - **512 MB Render instance (Free/Standard): sufficient
-  with the ONNX path** � measured ~186 MB peak, ~60%
+  with the ONNX path** � measured ~186 MB peak, ~60%
   headroom for request handling. This was previously
   impossible (667 MB peak).
-- **PyTorch fallback needs a 1 GB+ instance** � it
+- **PyTorch fallback needs a 1 GB+ instance** � it
   peaks at ~466 MB bare / ~505 MB with the server
   stack, which does not reliably fit 512 MB. Keep
   `MODEL_PATH` on the `.onnx` file in production.
 - If even 512 MB is ever tight, quantizing the ONNX
   model to int8 (~47 MB, ~90 MB RSS) is the next
-  step � not needed today.
+  step � not needed today.
 
 ### Remaining limitations
 
@@ -435,3 +435,136 @@ Live-server verification (uvicorn + production ONNX):
 - The 283 MB original checkpoint remains in the repo
   (LFS) for provenance/fallback; it is no longer
   loaded by default.
+
+---
+
+## Connection Error Diagnosis & Fix (Phase 7) ✅
+
+**Symptom:** the frontend showed
+*"Could not reach the AI backend. Check your connection,
+make sure the backend URL is configured correctly (config.js),
+and verify the backend is running and allows requests from
+this site (CORS)."*
+
+### Diagnosis (evidence, not guesses)
+
+1. **Backend URL + endpoint — correct.**
+   `frontend/config.js` points to
+   `https://crop-doctor-1-mx0d.onrender.com/` (the trailing
+   slash is stripped by `app.js`); `app.js` POSTs multipart
+   `FormData` to `/api/predict`. URL and HTTP method verified
+   against the live service.
+2. **Backend + model — healthy.** `GET /health` → 200,
+   `model_loaded: true`, `backend: onnx`, 17 classes. The
+   ONNX file is an export of the same `.pth` weights (parity
+   ≤ 1.2e-07); the original `.pth` remains as the PyTorch
+   fallback. Model loading was never the problem.
+3. **Server-to-server prediction — works.** Real `wheat.jpg`
+   POST → `{"predicted_class":"wheat","confidence":0.568637}`
+   in ~1.6 s against production. Backend, model and endpoint
+   are all functional.
+4. **CORS allowlist — ROOT CAUSE.** `FRONTEND_ORIGIN` was
+   **unset** on the Render service, so the backend fell back
+   to the localhost-only dev allowlist
+   (`localhost`/`127.0.0.1` ports 5500/3000/8000/8080).
+   The frontend is **not** served from localhost (no local
+   server running on those ports; the Vercel URL is not
+   reachable), so the browser blocked the response →
+   `fetch` rejected with a TypeError → the catch-all error
+   message. Verified on production: POST with
+   `Origin: http://localhost:5500` → `access-control-allow-origin`
+   echoed; POST with any other origin → **no CORS header**
+   (fail-closed, correct).
+5. **`render.yaml` footgun:** it still contained the
+   placeholder `FRONTEND_ORIGIN: https://YOUR-VERCEL-FRONTEND.vercel.app`,
+   which would have become a real (bogus) value if applied
+   via Blueprint.
+
+### Fix (commit `6ed9efd`, pushed and deployed)
+
+- `backend/app/main.py` — `/health` now reports the effective
+  CORS allowlist (`cors_origins`); the lifespan logs the
+  allowlist at startup and warns when `FRONTEND_ORIGIN` is
+  unset.
+- `backend/app/schemas.py` — `HealthResponse.cors_origins`
+  field.
+- `backend/render.yaml` — placeholder replaced with `""`
+  (fails closed to dev defaults) plus a comment stating it
+  must be set on the service for production.
+- `frontend/app.js` — separated error classes:
+  - pre-flight config checks (missing URL, `file://` page,
+    HTTPS page + `http://` API URL = mixed content);
+  - responses are read as **text then parsed**, so a proxy's
+    non-JSON error page (e.g. Render 502 HTML) is reported
+    as an "unexpected non-JSON response" instead of being
+    mistaken for a network failure;
+  - per-status messages (400/413/422/502/503/5xx);
+  - the network/CORS catch now shows the endpoint URL **and**
+    the site's own origin (`location.origin`) so the user can
+    compare it against the backend's allowlist.
+- `frontend/config.js` — backend URL updated to the Render
+  service (commit `1a53f70`).
+- `backend/tests/test_api.py` — 4 new tests: health exposes
+  `cors_origins`; dev-default fallback when the env var is
+  unset/blank; configured origin reported by `/health`;
+  blank entries ignored.
+
+### Test results (actual)
+
+`pytest tests -v` → **40 passed, 0 failed** (36 existing +
+4 new). `node --check frontend/app.js` → OK.
+
+### Live verification (actual)
+
+- **Local** (uvicorn + production ONNX model): startup log
+  shows the allowlist and the unset-`FRONTEND_ORIGIN`
+  warning; `GET /health` with `Origin: http://localhost:5500`
+  → 200 + CORS header + `cors_origins` list;
+  `POST /api/predict` (`wheat.jpg`, same Origin) → 200 +
+  CORS header + `wheat` 0.568637; POST with
+  `Origin: https://unknown-frontend.example.com` → 200 body
+  but **no** CORS header (browser would block — fail-closed).
+- **Production** (redeployed with the fix): `GET /health` →
+  healthy, `backend: onnx`, `cors_origins` = dev defaults
+  (proof `FRONTEND_ORIGIN` is still unset);
+  `POST /api/predict` with `Origin: http://localhost:5500` →
+  200 + `access-control-allow-origin: http://localhost:5500`
+  + real prediction; with `Origin: https://evil.example.com`
+  → no CORS header (blocked, correct).
+
+### ONE remaining manual step (agent cannot do this)
+
+Set `FRONTEND_ORIGIN` on the Render service to the **exact
+origin the frontend is served from** — the scheme + host +
+port shown in the browser address bar when the app is open
+(e.g. `https://your-project.vercel.app`, no trailing slash).
+
+Render dashboard → the backend service → **Environment** →
+`FRONTEND_ORIGIN` → save (service redeploys).
+
+Verify afterwards:
+
+```
+curl.exe -s https://crop-doctor-1-mx0d.onrender.com/health
+```
+
+must show your frontend origin inside `cors_origins`. Until
+this is set, any page not served from
+localhost/127.0.0.1:5500/3000/8000/8080 keeps getting the
+connection error — the browser blocks the response even
+though the backend is healthy.
+
+### Git state
+
+- `1a53f70` — `frontend/config.js`: backend URL → Render
+  service (owner commit).
+- `6ed9efd` — the Phase 7 fix (owner commit of the agent's
+  changes). Local `HEAD` == `origin/main` == deployed.
+- Documentation update (this section) — push with:
+
+```bash
+cd "C:\Python files\AIMD\AIMD\expression detection\crop doctor\crop disease"
+git add PROJECT_PROGRESS.md
+git commit -m "Document connection error diagnosis and fix"
+git push origin main
+```
