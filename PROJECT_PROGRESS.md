@@ -485,7 +485,9 @@ this site (CORS)."*
 - `backend/app/main.py` — `/health` now reports the effective
   CORS allowlist (`cors_origins`); the lifespan logs the
   allowlist at startup and warns when `FRONTEND_ORIGIN` is
-  unset.
+  unset. Configured origins are normalized (trailing `/`
+  stripped) so a `https://host/` value still matches the
+  `Origin` header browsers send (`https://host`).
 - `backend/app/schemas.py` — `HealthResponse.cors_origins`
   field.
 - `backend/render.yaml` — placeholder replaced with `""`
@@ -511,8 +513,8 @@ this site (CORS)."*
 
 ### Test results (actual)
 
-`pytest tests -v` → **40 passed, 0 failed** (36 existing +
-4 new). `node --check frontend/app.js` → OK.
+`pytest tests -v` → **41 passed, 0 failed** (36 existing +
+5 new). `node --check frontend/app.js` → OK.
 
 ### Live verification (actual)
 
@@ -532,39 +534,74 @@ this site (CORS)."*
   + real prediction; with `Origin: https://evil.example.com`
   → no CORS header (blocked, correct).
 
-### ONE remaining manual step (agent cannot do this)
+### Root cause found (actual, from the live error)
 
-Set `FRONTEND_ORIGIN` on the Render service to the **exact
-origin the frontend is served from** — the scheme + host +
-port shown in the browser address bar when the app is open
-(e.g. `https://your-project.vercel.app`, no trailing slash).
+The improved frontend error revealed the real deployment:
+backend `https://crop-doctor-2.onrender.com`, frontend
+`https://crop-doctor-frontend-deur.vercel.app` (config.js
+on Vercel correctly points at the new backend).
 
+`GET /health` on `crop-doctor-2` showed:
+
+```
+"cors_origins": ["https://crop-doctor-frontend-dun.vercel.app/"]
+```
+
+**Two mismatches against the real origin**
+(`https://crop-doctor-frontend-deur.vercel.app`):
+
+1. **Typo:** `frontend-dun` vs `frontend-deur`
+2. **Trailing slash:** origins never include `/`
+
+So `POST /api/predict` with the correct
+`Origin: https://crop-doctor-frontend-deur.vercel.app`
+returned 200 **without** an `access-control-allow-origin`
+header → the browser blocked the response → the frontend
+showed the connection error. (Also observed: Render free
+tier cold start takes ~94 s — the first request after
+idle looks like a hang/timeout but is not an error.)
+
+### Fix (two parts)
+
+**A. Agent-side (committed):** trailing-slash normalization
+in `_cors_origins()` + test (`test_cors_strips_trailing_slash`).
+
+**B. Owner-side (REQUIRED — agent cannot access Render):**
+correct the env var on the `crop-doctor-2` service.
 Render dashboard → the backend service → **Environment** →
-`FRONTEND_ORIGIN` → save (service redeploys).
+`FRONTEND_ORIGIN` → set to exactly:
+
+```
+https://crop-doctor-frontend-deur.vercel.app
+```
+
+(no trailing slash, `deur` not `dun`) → **Apply Changes**
+(service redeploys).
 
 Verify afterwards:
 
 ```
-curl.exe -s https://crop-doctor-1-mx0d.onrender.com/health
+curl.exe -s https://crop-doctor-2.onrender.com/health
 ```
 
-must show your frontend origin inside `cors_origins`. Until
-this is set, any page not served from
-localhost/127.0.0.1:5500/3000/8000/8080 keeps getting the
-connection error — the browser blocks the response even
-though the backend is healthy.
+must show `"cors_origins":["https://crop-doctor-frontend-deur.vercel.app"]`.
+The browser request then succeeds — this was verified
+end-to-end: with the matching origin the backend returns
+the prediction **and** the CORS header (wheat 0.568637),
+and any other origin gets no header (fail-closed).
 
 ### Git state
 
 - `1a53f70` — `frontend/config.js`: backend URL → Render
   service (owner commit).
 - `6ed9efd` — the Phase 7 fix (owner commit of the agent's
-  changes). Local `HEAD` == `origin/main` == deployed.
-- Documentation update (this section) — push with:
+  changes).
+- `44d361d` — documentation of the diagnosis.
+- Trailing-slash normalization + updated docs — push with:
 
 ```bash
 cd "C:\Python files\AIMD\AIMD\expression detection\crop doctor\crop disease"
-git add PROJECT_PROGRESS.md
-git commit -m "Document connection error diagnosis and fix"
+git add -A
+git commit -m "Normalize FRONTEND_ORIGIN trailing slash; document real CORS root cause"
 git push origin main
 ```

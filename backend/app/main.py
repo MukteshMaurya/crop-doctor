@@ -66,7 +66,13 @@ def _cors_origins() -> List[str]:
     """
     raw = os.getenv("FRONTEND_ORIGIN", "").strip()
     if raw:
-        return [origin.strip() for origin in raw.split(",") if origin.strip()]
+        # Browsers send origins without a trailing slash, so
+        # tolerate (and strip) one in the configuration.
+        return [
+            origin.strip().rstrip("/")
+            for origin in raw.split(",")
+            if origin.strip()
+        ]
     return [
         "http://localhost:5500",
         "http://127.0.0.1:5500",

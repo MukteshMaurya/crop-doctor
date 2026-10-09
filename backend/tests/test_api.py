@@ -215,3 +215,13 @@ def test_cors_blank_string_is_ignored(monkeypatch):
     from app.main import _cors_origins
 
     assert _cors_origins() == ["https://app.example.com"]
+
+
+def test_cors_strips_trailing_slash(monkeypatch):
+    # Browsers never send a trailing slash in Origin; tolerate
+    # it in configuration so a "https://host/" value still
+    # matches requests from "https://host".
+    monkeypatch.setenv("FRONTEND_ORIGIN", "https://app.example.com/")
+    from app.main import _cors_origins
+
+    assert _cors_origins() == ["https://app.example.com"]
