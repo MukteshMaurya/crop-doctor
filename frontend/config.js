@@ -13,5 +13,5 @@
 // Do NOT use localhost in production.
 // ============================================================================
 window.APP_CONFIG = {
-  API_BASE_URL: "http://127.0.0.1:8000",
+  API_BASE_URL: "https://crop-doctor-1-mx0d.onrender.com/",
 };
